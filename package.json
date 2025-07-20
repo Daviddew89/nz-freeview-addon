@@ -1,0 +1,30 @@
+{
+  "name": "nz-freeview-addon",
+  "version": "1.0.4",
+  "description": "NZ Freeview TV addon for Stremio",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "fast-xml-parser": "^4.2.5",
+    "node-fetch": "^2.7.0",
+    "stremio-addon-sdk": "^1.6.10"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "stremio",
+    "addon",
+    "nz",
+    "freeview",
+    "tv",
+    "streaming"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
+}

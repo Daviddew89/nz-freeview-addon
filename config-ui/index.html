@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Configure NZ Freeview TV Addon</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --accent: #3cb371;
+      --accent-gradient: linear-gradient(90deg, #3cb371 0%, #1e824c 100%);
+      --surface: #181a20;
+      --surface-alt: #23262f;
+      --surface-card: #23262f;
+      --surface-card-glow: 0 4px 32px #3cb37122;
+      --text-muted: #b7e2c7;
+      --danger: #ff6b6b;
+      --radius: 18px;
+      --radius-sm: 10px;
+      --shadow: 0 2px 16px #0008;
+      --shadow-card: 0 4px 32px #3cb37122;
+    }
+    body {
+      background: var(--surface);
+      color: #fff;
+      font-family: 'Inter', 'Roboto', Arial, sans-serif;
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(ellipse at 60% 0%, #23262f 0%, #181a20 100%);
+    }
+    .container {
+      max-width: 480px;
+      margin: 32px auto;
+      background: var(--surface-card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-card);
+      padding: 32px 18px 24px 18px;
+      position: relative;
+      overflow: hidden;
+    }
+    .container:before {
+      content: '';
+      position: absolute;
+      top: -60px; left: -60px;
+      width: 180px; height: 180px;
+      background: var(--accent-gradient);
+      opacity: 0.13;
+      border-radius: 50%;
+      z-index: 0;
+    }
+    /* Fern SVG background overlay */
+    .container:after {
+      content: '';
+      position: absolute;
+      bottom: -40px; right: -40px;
+      width: 220px; height: 220px;
+      background: url('data:image/svg+xml;utf8,<svg width="220" height="220" viewBox="0 0 220 220" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M30 200 Q110 100 200 30 Q170 110 100 200 Q80 170 30 200" stroke="%233cb371" stroke-width="8" fill="none"/><path d="M60 180 Q100 140 180 60" stroke="%233cb371" stroke-width="4" fill="none"/><path d="M80 170 Q120 120 170 80" stroke="%233cb371" stroke-width="3" fill="none"/></svg>') no-repeat bottom right;
+      opacity: 0.18;
+      z-index: 0;
+      pointer-events: none;
+    }
+    h1 {
+      font-size: 2.1em;
+      margin-bottom: 0.15em;
+      font-weight: 700;
+      letter-spacing: -1px;
+      z-index: 1;
+      position: relative;
+    }
+    .subtitle {
+      color: var(--text-muted);
+      margin-bottom: 22px;
+      font-size: 1.13em;
+      z-index: 1;
+      position: relative;
+    }
+    .controls {
+      margin-bottom: 20px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      z-index: 1;
+      position: relative;
+    }
+    .controls input#search { /* Apply style to the specific search input */
+      padding: 10px 14px;
+      font-size: 1.08em;
+      border-radius: var(--radius-sm);
+      border: none;
+      background: #23262f;
+      color: #fff;
+      outline: none;
+      box-shadow: 0 1px 4px #0002;
+      flex: 1 1 120px;
+      min-width: 0;
+      transition: box-shadow 0.18s;
+    }
+    .controls input:focus {
+      box-shadow: 0 0 0 2px #3cb37155;
+    }
+    .controls button {
+      background: var(--accent-gradient);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-size: 1.08em;
+      font-weight: 600;
+      padding: 10px 0;
+      cursor: pointer;
+      box-shadow: 0 1px 4px #0002;
+      flex: 1 1 90px;
+      min-width: 0;
+      transition: background 0.18s, color 0.18s, box-shadow 0.18s;
+      outline: none;
+    }
+    .controls button:hover, .controls button:focus {
+      background: linear-gradient(90deg, #1e824c 0%, #3cb371 100%);
+      color: #fff;
+      box-shadow: 0 2px 8px #3cb37144;
+    }
+    ul.channel-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      z-index: 1;
+      position: relative;
+    }
+    ul.channel-list li {
+      display: flex;
+      align-items: center;
+      background: #23262f;
+      border: 1.5px solid #2e3340;
+      border-radius: var(--radius-sm);
+      margin-bottom: 3px;
+      padding: 7px 7px 7px 0;
+      transition: background 0.2s, box-shadow 0.2s, border 0.2s;
+      min-height: 44px;
+      box-shadow: 0 1px 4px #0002;
+      position: relative;
+    }
+    ul.channel-list li.selected {
+      background: #1e2e1e;
+      border: 1.5px solid #3cb371;
+      box-shadow: 0 2px 12px #3cb37122;
+    }
+    ul.channel-list li.dragging {
+      opacity: 0.5;
+      box-shadow: 0 0 12px #3cb371;
+      border: 1.5px dashed #3cb371;
+    }
+    ul.channel-list img {
+      width: 38px;
+      height: 38px;
+      object-fit: contain;
+      margin-right: 10px;
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 1px 4px #0001;
+      border: 1px solid #eee;
+    }
+    ul.channel-list label {
+      flex: 1;
+      cursor: pointer;
+      font-size: 1.08em;
+      font-weight: 500;
+      letter-spacing: -0.5px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    ul.channel-list input[type="checkbox"] {
+      margin-right: 10px;
+      width: 22px;
+      height: 22px;
+      accent-color: var(--accent);
+      border-radius: 6px;
+      border: 1.5px solid #3cb37144;
+      background: #23262f;
+      transition: border 0.18s;
+    }
+    .divider {
+      border-top: 1.5px dashed #3cb37188;
+      margin: 10px 0;
+    }
+    .drop-indicator {
+      height: 0;
+      margin: 0;
+      padding: 0;
+      border: none;
+      position: relative;
+    }
+    .drop-indicator.active div {
+      border-top: 3px solid var(--accent);
+      margin: 0 4px;
+      border-radius: 2px;
+    }
+    .drop-indicator div {
+      border-top: 3px solid transparent;
+      margin: 0 4px;
+    }
+    .manifest-section {
+      text-align: center;
+      margin-top: 32px;
+      background: #23262f;
+      border-radius: var(--radius-sm);
+      padding: 22px 10px 14px 10px;
+      box-shadow: 0 2px 8px #3cb37122;
+      z-index: 1;
+      position: relative;
+    }
+    .manifest-section a {
+      display: inline-block;
+      margin-bottom: 10px;
+      font-weight: 700;
+      font-size: 1.18rem;
+      color: #fff;
+      text-decoration: none;
+      transition: color 0.2s, background 0.2s;
+      border-radius: var(--radius-sm);
+      padding: 8px 18px;
+      background: var(--accent-gradient);
+      border: none;
+      box-shadow: 0 1px 4px #0002;
+    }
+    .manifest-section a[aria-disabled="true"] {
+      color: #888;
+      pointer-events: none;
+      background: #23262f;
+      border: 1.5px solid #23262f;
+    }
+    .manifest-section .url {
+      font-size: 1.01rem;
+      color: var(--text-muted);
+      word-break: break-all;
+      background: #181a20;
+      border-radius: var(--radius-sm);
+      padding: 8px 12px;
+      display: block;
+      margin: 0 auto;
+      margin-top: 8px;
+      max-width: 98%;
+      box-shadow: 0 1px 4px #0002;
+    }
+    .manifest-section button {
+      margin-bottom: 8px;
+      background: var(--accent-gradient);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-size: 1rem;
+      font-weight: 600;
+      padding: 8px 0;
+      cursor: pointer;
+      transition: background 0.18s, color 0.18s, box-shadow 0.18s;
+      width: 100%;
+      box-shadow: 0 1px 4px #0002;
+      outline: none;
+    }
+    .manifest-section button:hover, .manifest-section button:focus {
+      background: linear-gradient(90deg, #1e824c 0%, #3cb371 100%);
+      color: #fff;
+      box-shadow: 0 2px 8px #3cb37144;
+    }
+    .error {
+      color: var(--danger);
+      text-align: center;
+      margin-top: 18px;
+      font-weight: 600;
+      font-size: 1.08rem;
+      background: #23262f;
+      border-radius: var(--radius-sm);
+      padding: 10px 0;
+      box-shadow: 0 1px 4px #ff6b6b22;
+    }
+    /* --- Responsive styles --- */
+    @media (max-width: 600px) {
+      .container { max-width: 99vw; padding: 8vw 2vw 8vw 2vw; }
+      h1 { font-size: 1.3em; }
+      .subtitle { font-size: 1em; }
+      .controls { flex-direction: column; gap: 10px; }
+      .controls input { width: 100%; font-size: 1em; margin-right: 0; }
+      .controls button { width: 100%; font-size: 1em; margin-right: 0; }
+      ul.channel-list img { width: 32px; height: 32px; }
+      ul.channel-list li { font-size: 1em; padding: 6px 2px; }
+      .manifest-section { padding: 12px 2vw 8px 2vw; }
+      .manifest-section a, .manifest-section button { width: 100%; font-size: 1em; padding: 10px 0; }
+      .manifest-section .url { font-size: 0.98em; }
+    }
+    @media (max-width: 400px) {
+      .container { padding: 2vw 0 2vw 0; }
+      h1 { font-size: 1em; }
+      .subtitle { font-size: 0.95em; }
+      ul.channel-list li { font-size: 0.95em; }
+    }
+    .channel-logo {
+      max-width: 100%;
+      max-height: 38px;
+      object-fit: contain;
+      display: inline-block;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 1px 4px #0001;
+      border: 1px solid #eee;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Configure NZ Freeview TV Addon</h1>
+    <div class="subtitle">Select and reorder the channels you want to appear in Stremio. <br>Enjoy a beautiful, modern, dark experience!</div>
+    <div class="controls">
+      <input type="text" id="search" placeholder="Search channels...">
+      <button id="selectAll">Select All</button>
+      <button id="deselectAll">Deselect All</button>
+      <button id="reset">Reset</button>
+    </div>
+    <ul class="channel-list" id="channelList">
+      <!-- Channel items will be rendered here by JS -->
+    </ul>
+    <div class="manifest-section">
+      <a id="installLink" href="#" aria-disabled="true">Install in Stremio</a><br>
+      <button id="toggleManifestUrl" type="button" style="margin-bottom: 8px;">Show Manifest URL</button>
+      <span class="url" id="manifestUrl" style="display:none;"></span>
+    </div>
+    <div class="error" id="error"></div>
+  </div>
+  <script src="configure.js"></script>
+</body>
+</html> 
