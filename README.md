@@ -17,7 +17,7 @@ A Stremio addon that provides access to free New Zealand TV channels with full E
 1. **Copy this URL**: `https://your-addon.beamup.app/manifest.json`
 2. **Open Stremio** → Addons → Community Addons
 3. **Click "Add Addon"** and paste the URL
-4. **Click "Install"**
+4. **Click "Install"`
 
 ## Channel Categories
 
@@ -132,4 +132,4 @@ If you encounter any issues:
 
 ---
 
-**Enjoy watching NZ TV in Stremio! 🇳🇿📺** 
+**Enjoy watching NZ TV in Stremio! 🇳🇿📺**
