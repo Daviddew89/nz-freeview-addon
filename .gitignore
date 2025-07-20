@@ -150,6 +150,7 @@ ehthumbs.db
 Thumbs.db
 
 # Deployment files
+deploy.bat
 update-cloudrun.bat
 install-gcloud.ps1
 QUICK-DEPLOYMENT.md

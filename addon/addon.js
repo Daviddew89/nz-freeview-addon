@@ -40,6 +40,23 @@ const M3U_URL = 'https://i.mjh.nz/nz/kodi-tv.m3u8';
 const EPG_URL = 'https://i.mjh.nz/nz/epg.xml.gz';
 const DEFAULT_ICON = 'https://i.mjh.nz/tv-logo/tvmate/Freeview.png';
 
+// The public host for the addon. This is crucial for generating absolute URLs that the Stremio
+// web player can use. We fall back to a local address for development.
+const PORT = process.env.PORT || 8080;
+let ADDON_HOST = process.env.ADDON_HOST;
+
+if (!ADDON_HOST) {
+    // For local development, we default to localhost.
+    // IMPORTANT: For testing with Stremio Web (web.stremio.com), this MUST be an https URL
+    // due to browser mixed-content security policies. Use a tool like ngrok to create a
+    // public https tunnel to your local server and set ADDON_HOST to that URL.
+    // Example: ADDON_HOST=https://1234-abcd.ngrok.io npm start
+    ADDON_HOST = `http://127.0.0.1:${PORT}`;
+    log('WARN', 'CONFIG', `ADDON_HOST is not set. Defaulting to ${ADDON_HOST}. This will NOT work with Stremio Web.`);
+} else if (ADDON_HOST.startsWith('http://')) {
+    log('WARN', 'CONFIG', `ADDON_HOST is using http. This may not work with Stremio Web due to mixed-content policies.`);
+}
+
 const manifest = {
     id: 'org.nzfreeview',
     version: '1.0.4',
@@ -282,52 +299,6 @@ function getEpgForChannel(epg, epgId) {
     return { current };
 }
 
-function createVideoObject(programme, channelId, isCurrent = true) {
-    const videoId = `nzfreeview-${channelId}`;
-    
-    if (!programme) {
-        const now = new Date();
-        return {
-            id: videoId,
-            title: 'Live',
-            released: now.toISOString(),
-            thumbnail: undefined,
-            overview: 'Live TV stream',
-            available: true,
-            season: null,
-            episode: null,
-            live: true,
-            type: 'tv'
-        };
-    }
-    
-    let releasedDate;
-    try {
-        if (programme.start) {
-            const parsedDate = parseEpgDate(programme.start);
-            releasedDate = parsedDate ? parsedDate.toISOString() : new Date().toISOString();
-        } else {
-            releasedDate = new Date().toISOString();
-        }
-    } catch (error) {
-        releasedDate = new Date().toISOString();
-    }
-    
-    return {
-        id: videoId,
-        title: 'Live',
-        released: releasedDate,
-        thumbnail: programme.icon?.src || programme.thumb?.src || programme.art?.poster,
-        overview: programme.desc || 'Live TV stream',
-        season: null,
-        episode: null,
-        runtime: programme.runtime,
-        available: true,
-        live: true,
-        type: 'tv'
-    };
-}
-
 function lcnSort(a, b) {
     const getLcn = meta => parseInt(meta.chno) || 9999;
     const lcnDiff = getLcn(a) - getLcn(b);
@@ -372,26 +343,34 @@ builder.defineCatalogHandler(async (args) => {
             try {
                 const epgId = channel.id;
                 const { current } = getEpgForChannel(epg, epgId);
-                const currentVideo = createVideoObject(current, channel.id, true);
                 
-                const poster = currentVideo.thumbnail || channel.logo || DEFAULT_ICON;
-                const background = currentVideo.thumbnail || channel.logo || DEFAULT_ICON;
+                let description = `Live channel: ${channel.name}`;
+                if (current && current.title) {
+                    const start = parseEpgDate(current.start);
+                    const stop = parseEpgDate(current.stop);
+                    const startTime = start ? start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
+                    const stopTime = stop ? stop.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
+                    const title = typeof current.title === 'object' ? current.title.text : current.title;
+                    const desc = typeof current.desc === 'object' ? current.desc.text : current.desc;
+                    description = `Now: ${title} (${startTime} - ${stopTime})\n\n${desc || ''}`;
+                }
+
+                const poster = (current && current.icon?.src) || channel.logo || DEFAULT_ICON;
                 const genres = channel.group ? [channel.group] : ['Live'];
                 
                 return {
                     id: 'nzfreeview-' + channel.id,
                     type: 'tv',
                     name: channel.name || 'Unknown Channel',
-                    poster,
+                    poster: poster,
                     posterShape: 'landscape',
                     logo: channel.logo || DEFAULT_ICON,
-                    description: `Live channel: ${channel.name}`,
-                    background,
+                    description: description.trim(),
+                    background: poster,
                     country: ['NZ'],
                     language: ['en'],
                     genres,
-                    chno: channel.chno,
-                    videos: [currentVideo]
+                    chno: channel.chno
                 };
                 
             } catch (error) {
@@ -399,7 +378,6 @@ builder.defineCatalogHandler(async (args) => {
                     error: error.message 
                 });
                 
-                const liveVideo = createVideoObject(null, channel.id, true);
                 return {
                     id: 'nzfreeview-' + channel.id,
                     type: 'tv',
@@ -412,8 +390,7 @@ builder.defineCatalogHandler(async (args) => {
                     country: ['NZ'],
                     language: ['en'],
                     genres: channel.group ? [channel.group] : ['Live'],
-                    chno: channel.chno,
-                    videos: [liveVideo]
+                    chno: channel.chno
                 };
             }
         });
@@ -450,12 +427,21 @@ builder.defineMetaHandler(async (args) => {
     try {
         const epg = await getEPG();
         const { current } = getEpgForChannel(epg, id);
-        const currentVideo = createVideoObject(current, channel.id, true);
-        
-        const poster = currentVideo.thumbnail || channel.logo || DEFAULT_ICON;
-        const background = currentVideo.thumbnail || channel.logo || DEFAULT_ICON;
+
+        let description = `Live channel: ${channel.name}`;
+        if (current && current.title) {
+            const start = parseEpgDate(current.start);
+            const stop = parseEpgDate(current.stop);
+            const startTime = start ? start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
+            const stopTime = stop ? stop.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
+            const title = typeof current.title === 'object' ? current.title.text : current.title;
+            const desc = typeof current.desc === 'object' ? current.desc.text : current.desc;
+            description = `Now: ${title} (${startTime} - ${stopTime})\n\n${desc || ''}`;
+        }
+
+        const poster = (current && current.icon?.src) || channel.logo || DEFAULT_ICON;
         const genres = channel.group ? [channel.group] : ['Live'];
-        
+
         const duration = Date.now() - startTime;
         log('DEBUG', 'META', `Processed channel: ${channel.name}`, { duration });
         
@@ -463,16 +449,15 @@ builder.defineMetaHandler(async (args) => {
             id: 'nzfreeview-' + channel.id,
             type: 'tv',
             name: channel.name || 'Unknown Channel',
-            poster,
+            poster: poster,
             posterShape: 'landscape',
             logo: channel.logo || DEFAULT_ICON,
-            description: `Live channel: ${channel.name}`,
-            background,
+            description: description.trim(),
+            background: poster,
             country: ['NZ'],
             language: ['en'],
             genres,
-            chno: channel.chno,
-            videos: [currentVideo]
+            chno: channel.chno
         }};
         
     } catch (error) {
@@ -481,7 +466,6 @@ builder.defineMetaHandler(async (args) => {
             error: error.message 
         });
         
-        const liveVideo = createVideoObject(null, channel.id, true);
         return { meta: {
             id: 'nzfreeview-' + channel.id,
             type: 'tv',
@@ -494,8 +478,7 @@ builder.defineMetaHandler(async (args) => {
             country: ['NZ'],
             language: ['en'],
             genres: channel.group ? [channel.group] : ['Live'],
-            chno: channel.chno,
-            videos: [liveVideo]
+            chno: channel.chno
         }};
     }
 });
@@ -505,13 +488,8 @@ builder.defineStreamHandler(async (args) => {
     const startTime = Date.now();
     log('INFO', 'STREAM', 'Processing stream request', { id: args.id });
 
-    let channelId;
-    if (args.id.startsWith('nzfreeview-')) {
-        channelId = args.id.replace('nzfreeview-', '');
-    } else {
-        channelId = args.id;
-    }
-
+    // The SDK automatically strips the prefix from the ID, so we can use it directly.
+    const channelId = args.id;
     const allChannels = await getChannels();
     if (allChannels.length === 0) {
         return { streams: [] };
@@ -527,20 +505,23 @@ builder.defineStreamHandler(async (args) => {
         [cleanUrl] = cleanUrl.split('|');
     }
 
+    const streamOrigin = new URL(cleanUrl).origin;
+
+    // Always generate an absolute URL for the proxy. This is required for the Stremio web player.
+    const proxyUrl = new URL(`/proxy/${encodeURIComponent(cleanUrl)}`, ADDON_HOST).href;
+    
+    // We provide a single, robust proxied stream. This works across all clients (web, desktop, mobile)
+    // by routing the HLS traffic through our addon's server, which resolves CORS issues and
+    // rewrites manifest URLs to be absolute.
     const streams = [
         {
-            url: cleanUrl,
-            name: 'NZ Freeview (Direct)',
-            title: channel.name || 'Unknown Channel',
+            url: proxyUrl,
+            name: 'NZ Freeview (Proxied)',
+            title: `${channel.name || 'Unknown Channel'}`,
             type: 'hls',
-            quality: 'HD'
-        },
-        {
-            url: `/proxy/${encodeURIComponent(cleanUrl)}`,
-            name: 'NZ Freeview (Web)',
-            title: channel.name || 'Unknown Channel',
-            type: 'hls',
-            quality: 'HD'
+            behaviorHints: {
+                notWebReady: false 
+            }
         }
     ];
 
