@@ -43,18 +43,17 @@ const DEFAULT_ICON = 'https://i.mjh.nz/tv-logo/tvmate/Freeview.png';
 // The public host for the addon. This is crucial for generating absolute URLs that the Stremio
 // web player can use. We fall back to a local address for development.
 const PORT = process.env.PORT || 8080;
-let ADDON_HOST = process.env.ADDON_HOST;
-
-if (!ADDON_HOST) {
-    // For local development, we default to localhost.
-    // IMPORTANT: For testing with Stremio Web (web.stremio.com), this MUST be an https URL
-    // due to browser mixed-content security policies. Use a tool like ngrok to create a
-    // public https tunnel to your local server and set ADDON_HOST to that URL.
-    // Example: ADDON_HOST=https://1234-abcd.ngrok.io npm start
+// Automatically detect the host URL. Prioritize Google Cloud Run's provided URL,
+// then a manually set ADDON_HOST, and finally fall back to localhost for local dev.
+let ADDON_HOST = process.env.K_SERVICE_URL || process.env.ADDON_HOST;
+ 
+if (ADDON_HOST) {
+    log('INFO', 'CONFIG', `Public addon host detected: ${ADDON_HOST}`);
+} else {
+    // Fallback for local development. This will not work with the Stremio web player.
+    // For web player testing, use a tunnel like ngrok and set the ADDON_HOST env variable.
     ADDON_HOST = `http://127.0.0.1:${PORT}`;
-    log('WARN', 'CONFIG', `ADDON_HOST is not set. Defaulting to ${ADDON_HOST}. This will NOT work with Stremio Web.`);
-} else if (ADDON_HOST.startsWith('http://')) {
-    log('WARN', 'CONFIG', `ADDON_HOST is using http. This may not work with Stremio Web due to mixed-content policies.`);
+    log('WARN', 'CONFIG', `No K_SERVICE_URL or ADDON_HOST found. Defaulting to ${ADDON_HOST}. This is for local testing only.`);
 }
 
 const manifest = {
