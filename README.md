@@ -14,10 +14,10 @@ A Stremio addon that provides access to free New Zealand TV channels with full E
 
 ## Quick Install
 
-1. **Copy this URL**: `https://your-addon.beamup.app/manifest.json`
+1. **Copy this URL**: `https://your-addon-url.run.app/manifest.json`
 2. **Open Stremio** → Addons → Community Addons
 3. **Click "Add Addon"** and paste the URL
-4. **Click "Install"`
+4. **Click "Install"**
 
 ## Channel Categories
 
@@ -31,7 +31,7 @@ A Stremio addon that provides access to free New Zealand TV channels with full E
 ## Configuration
 
 Visit the config UI to customize your channel selection:
-- **URL**: `https://your-addon.beamup.app/configure/`
+- **URL**: `https://your-addon-url.run.app/configure/`
 - **Features**: Select/deselect channels, drag-and-drop reordering
 - **Manifest URL**: Automatically generated for easy installation
 
@@ -75,17 +75,45 @@ open http://localhost:8080/configure/
 └── README.md            # This file
 ```
 
-## Deployment
+## Deployment: Google Cloud Run
 
-This addon is deployed on **Beamup** - Stremio's recommended hosting service.
+This addon is deployed on **Google Cloud Run** - a fully managed serverless platform.
 
-### Benefits of Beamup:
-- ✅ **Free forever** - No restrictions or limits
-- ✅ **Stremio optimized** - Built specifically for addons
-- ✅ **No sleep mode** - Always available
+### Prerequisites
+- Google Cloud account with billing enabled
+- [Google Cloud SDK](https://cloud.google.com/sdk/docs/install) installed
+- Docker (optional, Cloud Run can build from source)
+
+### Quick Deployment
+```bash
+# Run the deployment script
+./deploy-simple.ps1
+
+# Or deploy manually
+gcloud run deploy nz-freeview-addon \
+  --source . \
+  --platform managed \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --port 8080 \
+  --memory 512Mi \
+  --cpu 1 \
+  --max-instances 10
+```
+
+### Benefits of Google Cloud Run:
+- ✅ **Serverless** - No server management required
+- ✅ **Auto-scaling** - Scales to zero when not in use
 - ✅ **Global CDN** - Fast worldwide access
 - ✅ **Automatic HTTPS** - Required for Stremio
 - ✅ **CORS support** - Perfect for streaming proxy
+- ✅ **Pay per use** - Only pay for actual usage
+
+### Deployment Files
+- `Dockerfile` - Container configuration
+- `app.yaml` - App Engine configuration (alternative)
+- `.gcloudignore` - Files to exclude from deployment
+- `deploy-simple.ps1` - Automated deployment script
 
 ## Troubleshooting
 
@@ -96,13 +124,18 @@ This addon is deployed on **Beamup** - Stremio's recommended hosting service.
 
 ### Addon Not Loading
 - Ensure you're using the correct manifest URL
-- Check that the addon is accessible: `https://your-addon.beamup.app/health`
+- Check that the addon is accessible: `https://your-addon-url.run.app/health`
 - Verify HTTPS is working (required for Stremio)
 
 ### EPG Data Missing
 - EPG data is automatically updated every 30 minutes
 - Some channels may not have EPG data available
 - Check the addon logs for any errors
+
+### Deployment Issues
+- Ensure Google Cloud CLI is installed and authenticated
+- Check that billing is enabled for your project
+- Verify required APIs are enabled (Cloud Run, Cloud Build)
 
 ## Contributing
 
@@ -120,7 +153,7 @@ MIT License - see LICENSE file for details
 
 - **EPG Data**: [i.mjh.nz](https://i.mjh.nz/) - Matt Huisman
 - **Stremio SDK**: [stremio-addon-sdk](https://github.com/Stremio/stremio-addon-sdk)
-- **Hosting**: [Beamup](https://beamup.com) - Stremio's recommended hosting
+- **Hosting**: [Google Cloud Run](https://cloud.google.com/run) - Serverless container platform
 
 ## Support
 
