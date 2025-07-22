@@ -4,6 +4,9 @@ const { getRouter } = require('stremio-addon-sdk');
 const addonInterface = require('./addon/addon.js');
 const fetch = require('node-fetch');
 
+// Read version from package.json to have a single source of truth
+const { version } = require('./package.json');
+
 const app = express();
 const port = process.env.PORT || 8080;
 
@@ -57,6 +60,7 @@ app.get('/configure/configure.js', (req, res) => {
 const proxyHandler = async (req, res) => {
     let decodedUrl;
     let upstreamRes;
+    let customHeaders;
     try {
         const encodedUrl = req.params[0];
         if (!encodedUrl) {
@@ -77,13 +81,28 @@ const proxyHandler = async (req, res) => {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 30000);
 
+        // Parse headers from query params
+        let customHeaders = {
+            // Default headers as fallback
+            'User-Agent': 'otg/1.5.1 (AppleTv Apple TV 4; tvOS16.0; appletv.client) libcurl/7.58.0 OpenSSL/1.0.2o zlib/1.2.11 clib/1.8.56',
+            'Referer': ' ',
+            'seekable': '0'
+        };
+        
+        if (req.query.headers) {
+            try {
+                const parsedHeaders = JSON.parse(decodeURIComponent(req.query.headers));
+                // Merge headers, but don't overwrite the required ones unless they're in parsedHeaders
+                customHeaders = { ...customHeaders, ...parsedHeaders };
+            } catch (error) {
+                console.error('Error parsing headers:', error);
+            }
+        }
+
         try {
             upstreamRes = await fetch(decodedUrl, {
                 method: req.method,
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                    'Referer': baseUrl.origin
-                },
+                headers: customHeaders,
                 signal: controller.signal
             });
             if (!upstreamRes.ok && req.method === 'HEAD') {
@@ -91,13 +110,10 @@ const proxyHandler = async (req, res) => {
             }
         } catch (err) {
             if (req.method === 'HEAD') {
-                // Fallback to GET
+                // Fallback to GET using the same headers
                 upstreamRes = await fetch(decodedUrl, {
                     method: 'GET',
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                        'Referer': baseUrl.origin
-                    },
+                    headers: customHeaders,
                     signal: controller.signal
                 });
             } else {
@@ -164,12 +180,26 @@ const proxyHandler = async (req, res) => {
             upstreamRes.body.pipe(res);
         }
     } catch (error) {
-        console.error(`[PROXY] [${req.method}] Error:`, error.message);
+        clearTimeout(timeout);
+        const errorDetails = {
+            timestamp: new Date().toISOString(),
+            method: req.method,
+            url: decodedUrl,
+            error: error.message,
+            upstreamStatus: upstreamRes ? upstreamRes.status : null,
+            upstreamStatusText: upstreamRes ? upstreamRes.statusText : null,
+            headers: customHeaders || {},
+            query: req.query
+        };
+        
+        console.error('[PROXY] Error:', JSON.stringify(errorDetails, null, 2));
+        
         res.status(500).json({
             error: 'Proxy error',
             message: `${error.message}${decodedUrl ? ` for URL: ${decodedUrl}` : ''}`,
             upstreamStatus: upstreamRes ? upstreamRes.status : null,
-            url: req.params[0] || null
+            url: req.params[0] || null,
+            details: errorDetails
         });
     }
 };
@@ -185,7 +215,7 @@ app.get('/stats', (req, res) => {
             status: 'ok',
             timestamp: new Date().toISOString(),
             uptime: process.uptime(),
-            version: '1.0.4',
+            version: version,
             memory: process.memoryUsage(),
             platform: process.platform,
             nodeVersion: process.version
@@ -205,7 +235,7 @@ app.get('/health', (req, res) => {
         status: 'ok',
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
-        version: '1.0.4'
+        version: version
     });
 });
 

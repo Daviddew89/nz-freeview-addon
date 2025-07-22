@@ -1,7 +1,5 @@
 const { addonBuilder } = require('stremio-addon-sdk');
 const fetch = require('node-fetch');
-const { XMLParser } = require('fast-xml-parser');
-const zlib = require('zlib');
 
 // Enhanced logging system for production debugging
 const LOG_LEVELS = {
@@ -36,8 +34,7 @@ function log(level, component, message, data = null) {
     }
 }
 
-const M3U_URL = 'https://i.mjh.nz/nz/kodi-tv.m3u8';
-const EPG_URL = 'https://i.mjh.nz/nz/epg.xml.gz';
+const TV_JSON_URL = 'https://i.mjh.nz/nz/tv.json';
 const DEFAULT_ICON = 'https://i.mjh.nz/tv-logo/tvmate/Freeview.png';
 
 // The public host for the addon. This is crucial for generating absolute URLs that the Stremio
@@ -54,12 +51,21 @@ if (!ADDON_HOST) {
     log('INFO', 'CONFIG', `Public addon host detected: ${ADDON_HOST}`);
 }
 
+// Read version from package.json to have a single source of truth
+const { version } = require('../package.json');
+
+// Construct the absolute logo URL. This is essential for Stremio clients (especially web)
+// to be able to load the image. We fall back to a generic icon if the host is not available.
+const LOGO_URL = ADDON_HOST 
+    ? `${ADDON_HOST}/static/Logo.png` 
+    : 'https://i.mjh.nz/tv-logo/tvmate/Freeview.png';
+
 const manifest = {
     id: 'org.nzfreeview',
-    version: '1.0.4',
+    version: version,
     name: 'NZ Freeview TV',
     description: 'Watch free New Zealand TV channels. m3u8 and epg from https://www.matthuisman.nz/ and i.mjh.nz',
-    logo: '/static/Logo.png',
+    logo: LOGO_URL,
     background: 'https://i.mjh.nz/tv-logo/tvmate/Freeview.png',
     contactEmail: 'your@email.com',
     resources: ['catalog', 'meta', 'stream'],
@@ -86,237 +92,108 @@ const builder = new addonBuilder(manifest);
 
 // Cache configuration
 const CACHE_CONFIG = {
-    EPG_CACHE_DURATION: 24 * 60 * 60 * 1000, // 24 hours
-    CHANNEL_CACHE_DURATION: 60 * 60 * 1000, // 1 hour
+    TV_CACHE_DURATION: 60 * 60 * 1000, // 1 hour
 };
 
 // Cache storage
-let epgCache = {
+let tvDataCache = {
     data: null,
     lastFetch: 0,
     updatePromise: null
 };
 
-let channelCache = {
-    data: null,
-    lastFetch: 0,
-    updatePromise: null
-};
-
-// Update EPG cache
-async function updateEpgCache() {
+// Update TV data cache
+async function updateTVDataCache() {
     // If an update is already in progress, return the existing promise to avoid race conditions.
-    if (epgCache.updatePromise) {
-        log('DEBUG', 'EPG_CACHE', 'Update already in progress, awaiting existing fetch.');
-        return epgCache.updatePromise;
+    if (tvDataCache.updatePromise) {
+        log('DEBUG', 'TV_CACHE', 'Update already in progress, awaiting existing fetch.');
+        return tvDataCache.updatePromise;
     }
     
     const startTime = Date.now();
     const updateLogic = async () => {
         try {
-            log('INFO', 'EPG_CACHE', 'Starting EPG update');
-            const epgRes = await fetch(EPG_URL);
-            const epgBuf = await epgRes.buffer();
-            const epgXml = zlib.gunzipSync(epgBuf).toString();
-            const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '' });
-            const epg = parser.parse(epgXml);
+            log('INFO', 'TV_CACHE', 'Starting TV data update');
+            const tvRes = await fetch(TV_JSON_URL);
+            const tvData = await tvRes.json();
             
-            epgCache.data = epg;
-            epgCache.lastFetch = Date.now();
+            tvDataCache.data = tvData;
+            tvDataCache.lastFetch = Date.now();
             
+            const channelCount = Object.keys(tvData).length;
             const duration = Date.now() - startTime;
-            const programmeCount = epg.tv.programme?.length || 0;
-            log('INFO', 'EPG_CACHE', `Updated with ${programmeCount} programmes`, { 
+            log('INFO', 'TV_CACHE', `Updated with ${channelCount} channels`, { 
                 duration, 
-                programmeCount
+                channelCount 
             });
             
         } catch (error) {
             const duration = Date.now() - startTime;
-            log('ERROR', 'EPG_CACHE', 'Update failed', { 
+            log('ERROR', 'TV_CACHE', 'Update failed', { 
                 error: error.message, 
                 duration 
             });
             // Do not replace existing stale data if the update fails
         } finally {
             // Clear the promise to allow future updates
-            epgCache.updatePromise = null;
+            tvDataCache.updatePromise = null;
         }
     };
 
-    epgCache.updatePromise = updateLogic();
-    return epgCache.updatePromise;
+    tvDataCache.updatePromise = updateLogic();
+    return tvDataCache.updatePromise;
 }
 
-// Update channel cache
-async function updateChannelCache() {
-    // If an update is already in progress, return the existing promise.
-    if (channelCache.updatePromise) {
-        log('DEBUG', 'CHANNEL_CACHE', 'Update already in progress, awaiting existing fetch.');
-        return channelCache.updatePromise;
-    }
-    
-    const startTime = Date.now();
-    const updateLogic = async () => {
-        try {
-            log('INFO', 'CHANNEL_CACHE', 'Starting channel update');
-            const m3uRes = await fetch(M3U_URL);
-            const m3u = await m3uRes.text();
-            const lines = m3u.split(/\r?\n/);
-            
-            const channels = [];
-            let cur = null;
-            for (let i = 0; i < lines.length; ++i) {
-                const line = lines[i];
-                if (line.startsWith('#EXTINF:')) {
-                    const attrs = {};
-                    const attrRegex = /([\w-]+)="([^"]*)"/g;
-                    let match;
-                    while ((match = attrRegex.exec(line))) {
-                        attrs[match[1]] = match[2];
-                    }
-                    const lastComma = line.lastIndexOf(',');
-                    let name = lastComma !== -1 ? line.slice(lastComma + 1).trim() : undefined;
-                    cur = {
-                        id: attrs['channel-id'] || attrs['tvg-id'] || (name ? name.replace(/\s+/g, '-').toLowerCase() : undefined),
-                        name,
-                        logo: attrs['tvg-logo'] || undefined,
-                        group: attrs['group-title'] || undefined,
-                        chno: attrs['tvg-chno'] || undefined,
-                        url: null
-                    };
-                } else if (cur && line && !line.startsWith('#')) {
-                    cur.url = line.trim();
-                    if (cur.id && cur.name && cur.url) {
-                        channels.push(cur);
-                    }
-                    cur = null;
-                }
-            }
-            
-            channelCache.data = channels;
-            channelCache.lastFetch = Date.now();
-            
-            const duration = Date.now() - startTime;
-            log('INFO', 'CHANNEL_CACHE', `Updated with ${channels.length} channels`, { 
-                duration, 
-                channelCount: channels.length 
-            });
-            
-        } catch (error) {
-            const duration = Date.now() - startTime;
-            log('ERROR', 'CHANNEL_CACHE', 'Update failed', { 
-                error: error.message, 
-                duration 
-            });
-            // Do not replace existing stale data if the update fails
-        } finally {
-            // Clear the promise to allow future updates
-            channelCache.updatePromise = null;
-        }
-    };
-
-    channelCache.updatePromise = updateLogic();
-    return channelCache.updatePromise;
-}
-
-// Get EPG data with caching
-async function getEPG() {
+// Get TV data with caching
+async function getTVData() {
     const now = Date.now();
     
     // If cache is empty or expired, fetch fresh data
-    if (!epgCache.data || now - epgCache.lastFetch > CACHE_CONFIG.EPG_CACHE_DURATION) {
-        await updateEpgCache();
+    if (!tvDataCache.data || now - tvDataCache.lastFetch > CACHE_CONFIG.TV_CACHE_DURATION) {
+        await updateTVDataCache();
     }
     
-    return epgCache.data;
+    return tvDataCache.data || {}; // Always return an object
 }
 
-// Get channels with caching
+// Get all channels from TV data
 async function getChannels() {
-    const now = Date.now();
+    const tvData = await getTVData();
     
-    // If cache is empty or expired, fetch fresh data
-    if (!channelCache.data || now - channelCache.lastFetch > CACHE_CONFIG.CHANNEL_CACHE_DURATION) {
-        await updateChannelCache();
-    }
-    
-    return channelCache.data || []; // Always return an array
+    return Object.entries(tvData).map(([id, channel]) => ({
+        id: id,
+        name: channel.name,
+        logo: channel.logo,
+        description: channel.description,
+        chno: channel.chno,
+        url: channel.mjh_master,
+        network: channel.network
+    })).sort((a, b) => (a.chno || 999) - (b.chno || 999));
 }
 
-function parseEpgDate(dateString) {
-    if (!dateString) return null;
+function getCurrentProgram(channel) {
+    if (!channel || !Array.isArray(channel.programs)) return null;
     
-    try {
-        // Handle EPG date format: "20250719035000 +0000"
-        if (dateString.match(/^\d{14}\s+\+\d{4}$/)) {
-            const year = dateString.substring(0, 4);
-            const month = dateString.substring(4, 6);
-            const day = dateString.substring(6, 8);
-            const hour = dateString.substring(8, 10);
-            const minute = dateString.substring(10, 12);
-            const second = dateString.substring(12, 14);
-            
-            const isoString = `${year}-${month}-${day}T${hour}:${minute}:${second}.000Z`;
-            return new Date(isoString);
-        }
+    const now = Date.now() / 1000; // Current time in seconds
+    const buffer = 5 * 60; // 5 minutes buffer in seconds
+    
+    for (let i = 0; i < channel.programs.length; i++) {
+        const program = channel.programs[i];
+        if (!Array.isArray(program) || program.length < 2) continue;
         
-        return new Date(dateString);
-    } catch (error) {
-        log('ERROR', 'EPG_DATE', 'Error parsing EPG date', { 
-            dateString, 
-            error: error.message 
-        });
-        return null;
-    }
-}
-
-function getEpgForChannel(epg, epgId) {
-    const progs = (epg.tv.programme || []).filter(p => p.channel === epgId);
-    const now = Date.now();
-    let current = null;
-    
-    progs.sort((a, b) => {
-        const aStart = parseEpgDate(a.start);
-        const bStart = parseEpgDate(b.start);
-        if (!aStart || !bStart) return 0;
-        return aStart.getTime() - bStart.getTime();
-    });
-    
-    for (let i = 0; i < progs.length; ++i) {
-        try {
-            const start = parseEpgDate(progs[i].start);
-            const stop = parseEpgDate(progs[i].stop);
-            
-            if (!start || !stop || !progs[i].title) {
-                continue;
-            }
-            
-            const startTime = start.getTime();
-            const stopTime = stop.getTime();
-            const buffer = 5 * 60 * 1000; // 5 minutes buffer
-            
-            if (now >= (startTime - buffer) && now < (stopTime + buffer)) {
-                current = progs[i];
-                break;
-            }
-        } catch (error) {
-            continue;
+        const startTime = program[0];
+        const endTime = i < channel.programs.length - 1 ? channel.programs[i + 1][0] : startTime + (3 * 60 * 60); // Assume 3 hours if no next program
+        
+        if (now >= (startTime - buffer) && now < (endTime + buffer)) {
+            return {
+                start: startTime * 1000, // Convert to milliseconds
+                end: endTime * 1000,
+                title: program[1]
+            };
         }
     }
     
-    return { current };
-}
-
-function lcnSort(a, b) {
-    const getLcn = meta => parseInt(meta.chno) || 9999;
-    const lcnDiff = getLcn(a) - getLcn(b);
-    
-    if (lcnDiff === 0) {
-        return (a.name || '').localeCompare(b.name || '');
-    }
-    
-    return lcnDiff;
+    return null;
 }
 
 function getUserChannels(args, allChannels) {
@@ -327,8 +204,8 @@ function getUserChannels(args, allChannels) {
             .filter(Boolean);
         return { channels: orderedChannels, userSorted: true };
     }
-    const sortedChannels = [...allChannels].sort(lcnSort);
-    return { channels: sortedChannels, userSorted: false };
+    // allChannels is already sorted by chno from the getChannels function
+    return { channels: allChannels, userSorted: false };
 }
 
 // Catalog handler
@@ -340,8 +217,8 @@ builder.defineCatalogHandler(async (args) => {
     });
     
     try {
+        const tvData = await getTVData();
         const channels = await getChannels();
-        const epg = await getEPG();
         const { channels: filteredChannels, userSorted } = getUserChannels(args, channels);
         
         if (!filteredChannels || filteredChannels.length === 0) {
@@ -350,32 +227,27 @@ builder.defineCatalogHandler(async (args) => {
         
         const metaPromises = filteredChannels.map(async (channel) => {
             try {
-                const epgId = channel.id;
-                const { current } = getEpgForChannel(epg, epgId);
+                const channelData = tvData[channel.id];
+                const currentProgram = getCurrentProgram(channelData);
                 
-                let description = `Live channel: ${channel.name}`;
-                if (current && current.title) {
-                    const start = parseEpgDate(current.start);
-                    const stop = parseEpgDate(current.stop);
-                    const startTime = start ? start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
-                    const stopTime = stop ? stop.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
-                    const title = typeof current.title === 'object' ? current.title.text : current.title;
-                    const desc = typeof current.desc === 'object' ? current.desc.text : current.desc;
-                    description = `Now: ${title} (${startTime} - ${stopTime})\n\n${desc || ''}`;
+                let description = channelData.description || `Live channel: ${channel.name}`;
+                if (currentProgram) {
+                    const startTime = new Date(currentProgram.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+                    const endTime = new Date(currentProgram.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+                    description = `Now: ${currentProgram.title} (${startTime} - ${endTime})\n\n${channelData.description || ''}`;
                 }
 
-                const poster = (current && current.icon?.src) || channel.logo || DEFAULT_ICON;
-                const genres = channel.group ? [channel.group] : ['Live'];
+                const genres = channelData.network ? [channelData.network] : ['Live'];
                 
                 return {
                     id: 'nzfreeview-' + channel.id,
                     type: 'tv',
                     name: channel.name || 'Unknown Channel',
-                    poster: poster,
+                    poster: channel.logo || DEFAULT_ICON,
                     posterShape: 'landscape',
                     logo: channel.logo || DEFAULT_ICON,
                     description: description.trim(),
-                    background: poster,
+                    background: channel.logo || DEFAULT_ICON,
                     country: ['NZ'],
                     language: ['en'],
                     genres,
@@ -398,7 +270,7 @@ builder.defineCatalogHandler(async (args) => {
                     background: channel.logo || DEFAULT_ICON,
                     country: ['NZ'],
                     language: ['en'],
-                    genres: channel.group ? [channel.group] : ['Live'],
+                    genres: ['Live'],
                     chno: channel.chno
                 };
             }
@@ -423,6 +295,7 @@ builder.defineMetaHandler(async (args) => {
     const id = args.id.replace('nzfreeview-', '');
     log('INFO', 'META', 'Processing channel', { id });
 
+    const tvData = await getTVData();
     const allChannels = await getChannels();
     if (allChannels.length === 0) {
         return { meta: null };
@@ -434,22 +307,17 @@ builder.defineMetaHandler(async (args) => {
     }
 
     try {
-        const epg = await getEPG();
-        const { current } = getEpgForChannel(epg, id);
+        const channelData = tvData[id];
+        const currentProgram = getCurrentProgram(channelData);
 
-        let description = `Live channel: ${channel.name}`;
-        if (current && current.title) {
-            const start = parseEpgDate(current.start);
-            const stop = parseEpgDate(current.stop);
-            const startTime = start ? start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
-            const stopTime = stop ? stop.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
-            const title = typeof current.title === 'object' ? current.title.text : current.title;
-            const desc = typeof current.desc === 'object' ? current.desc.text : current.desc;
-            description = `Now: ${title} (${startTime} - ${stopTime})\n\n${desc || ''}`;
+        let description = channelData.description || `Live channel: ${channel.name}`;
+        if (currentProgram) {
+            const startTime = new Date(currentProgram.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+            const endTime = new Date(currentProgram.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+            description = `Now: ${currentProgram.title} (${startTime} - ${endTime})\n\n${channelData.description || ''}`;
         }
 
-        const poster = (current && current.icon?.src) || channel.logo || DEFAULT_ICON;
-        const genres = channel.group ? [channel.group] : ['Live'];
+        const genres = channelData.network ? [channelData.network] : ['Live'];
 
         const duration = Date.now() - startTime;
         log('DEBUG', 'META', `Processed channel: ${channel.name}`, { duration });
@@ -458,11 +326,11 @@ builder.defineMetaHandler(async (args) => {
             id: 'nzfreeview-' + channel.id,
             type: 'tv',
             name: channel.name || 'Unknown Channel',
-            poster: poster,
+            poster: channel.logo || DEFAULT_ICON,
             posterShape: 'landscape',
             logo: channel.logo || DEFAULT_ICON,
             description: description.trim(),
-            background: poster,
+            background: channel.logo || DEFAULT_ICON,
             country: ['NZ'],
             language: ['en'],
             genres,
@@ -503,42 +371,43 @@ builder.defineStreamHandler(async (args) => {
         return { streams: [] };
     }
 
-    // The SDK automatically strips the prefix from the ID, so we can use it directly.
-    const channelId = args.id;
-    const allChannels = await getChannels();
-    if (allChannels.length === 0) {
+    // The ID from Stremio includes our prefix. We need to remove it to match our internal channel ID.
+    const channelId = args.id.replace('nzfreeview-', '');
+    const tvData = await getTVData();
+    const channelData = tvData[channelId];
+    
+    if (!channelData || !channelData.mjh_master) {
         return { streams: [] };
     }
 
-    const channel = allChannels.find(c => c.id === channelId);
-    if (!channel || !channel.url) {
-        return { streams: [] };
-    }
-
-    let cleanUrl = channel.url;
-    if (cleanUrl.includes('|')) {
-        [cleanUrl] = cleanUrl.split('|');
-    }
-
-    const streamOrigin = new URL(cleanUrl).origin;
+    const url = channelData.mjh_master;
 
     // Always generate an absolute URL for the proxy. This is required for the Stremio web player.
-    const proxyUrl = `${ADDON_HOST}/proxy/${encodeURIComponent(cleanUrl)}`;
+    const proxyUrl = `${ADDON_HOST}/proxy/${encodeURIComponent(url)}`;
     
     // We provide a single, robust proxied stream. This works across all clients (web, desktop, mobile)
     // by routing the HLS traffic through our addon's server, which resolves CORS issues and
     // rewrites manifest URLs to be absolute.
+    // Add headers from the channel data to the proxy URL
+    if (channelData.headers) {
+        const encodedHeaders = encodeURIComponent(JSON.stringify(channelData.headers));
+        proxyUrl = `${proxyUrl}?headers=${encodedHeaders}`;
+    }
+
     const streams = [
         {
             url: proxyUrl,
             name: 'NZ Freeview (Proxied)',
             // Use `description` as `title` is being deprecated.
-            description: `${channel.name || 'Unknown Channel'}`,
+            description: `${channelData.name || 'Unknown Channel'}`,
             behaviorHints: {
                 // This is crucial for HLS streams. It tells Stremio that the URL,
                 // while served over HTTPS, is not a standard MP4 file and requires
                 // a player that can handle HLS manifests.
-                notWebReady: true
+                notWebReady: true,
+                bingeGroup: `nzfreeview-${channelId}`,
+                // Set header hints for the player
+                headers: channelData.headers || {}
             }
         }
     ];
