@@ -64,9 +64,9 @@ const manifest = {
     id: 'org.nzfreeview',
     version: version,
     name: 'NZ Freeview TV',
-    description: 'Watch free New Zealand TV channels. m3u8 and epg from https://www.matthuisman.nz/ and i.mjh.nz',
+    description: 'Watch free New Zealand TV channels. Live streams and EPG data from i.mjh.nz',
     logo: LOGO_URL,
-    background: 'https://i.mjh.nz/tv-logo/tvmate/Freeview.png',
+    background: LOGO_URL,
     contactEmail: 'your@email.com',
     resources: ['catalog', 'meta', 'stream'],
     types: ['tv'],
@@ -381,42 +381,52 @@ builder.defineStreamHandler(async (args) => {
     }
 
     const url = channelData.mjh_master;
-
-    // Always generate an absolute URL for the proxy. This is required for the Stremio web player.
-    const proxyUrl = `${ADDON_HOST}/proxy/${encodeURIComponent(url)}`;
     
-    // We provide a single, robust proxied stream. This works across all clients (web, desktop, mobile)
-    // by routing the HLS traffic through our addon's server, which resolves CORS issues and
-    // rewrites manifest URLs to be absolute.
-    // Add headers from the channel data to the proxy URL
+    // Build proxy URL with headers - used for both the manifest and segments
+    let proxyUrl = `${ADDON_HOST}/proxy/${encodeURIComponent(url)}`;
     if (channelData.headers) {
         const encodedHeaders = encodeURIComponent(JSON.stringify(channelData.headers));
-        proxyUrl = `${proxyUrl}?headers=${encodedHeaders}`;
+        proxyUrl += `?headers=${encodedHeaders}`;
     }
 
-    const streams = [
-        {
-            url: proxyUrl,
-            name: 'NZ Freeview (Proxied)',
-            // Use `description` as `title` is being deprecated.
-            description: `${channelData.name || 'Unknown Channel'}`,
-            behaviorHints: {
-                // This is crucial for HLS streams. It tells Stremio that the URL,
-                // while served over HTTPS, is not a standard MP4 file and requires
-                // a player that can handle HLS manifests.
-                notWebReady: true,
-                bingeGroup: `nzfreeview-${channelId}`,
-                // Set header hints for the player
-                headers: channelData.headers || {}
-            }
+    // Define headers as a string to avoid double encoding
+    const defaultHeaders = {
+        'User-Agent': 'stremio-freeview/1.0.0',
+        'Referer': ' ',
+        'seekable': '0'
+    };
+
+    // Merge default headers with channel-specific headers
+    const streamHeaders = {
+        ...defaultHeaders,
+        ...(channelData.headers || {})
+    };
+
+    const stream = {
+        url: proxyUrl,
+        name: 'NZ Freeview (Proxied)',
+        // Use `description` as `title` is being deprecated.
+        description: `${channelData.name || 'Unknown Channel'}`,
+        behaviorHints: {
+            // Live stream flags
+            isLive: true,
+            bingeGroup: `nzfreeview-${channelId}`,
+            // Transport hints
+            notWebReady: false, // Allow web player to handle HLS directly
+            isHLS: true, // Indicate this is an HLS stream
+            isCORSRequired: true,
+            player: 'hls',  // Force HLS player
+            subtitlesForDirectPlayback: false
         }
-    ];
+    };
+    
+    const streams = [stream];
 
     const duration = Date.now() - startTime;
     log('INFO', 'STREAM', 'Returning streams', { 
         duration,
         streamCount: streams.length,
-        channelName: channel.name
+        channelName: channelData.name || 'Unknown Channel'
     });
 
     return { streams };

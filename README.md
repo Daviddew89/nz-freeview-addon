@@ -37,10 +37,10 @@ Visit the config UI to customize your channel selection:
 
 ## Technical Details
 
-- **Data Source**: EPG and channel data from [i.mjh.nz](https://i.mjh.nz/)
+- **Data Source**: All channel data, EPG, and streams from [i.mjh.nz/nz/tv.json](https://i.mjh.nz/nz/tv.json)
 - **Stream Format**: HLS (HTTP Live Streaming)
 - **CORS Support**: Built-in proxy for web compatibility
-- **Auto-update**: EPG refreshes every 30 minutes
+- **Auto-update**: Data refreshes hourly
 - **Caching**: Optimized for performance and reliability
 
 ## Development
