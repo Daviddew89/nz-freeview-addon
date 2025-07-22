@@ -118,7 +118,7 @@ gcloud run deploy nz-freeview-addon \
 ## Troubleshooting
 
 ### Stream Not Playing
-- Try both "NZ Freeview (Direct)" and "NZ Freeview (Web)" stream options
+- The addon provides a single, proxied stream for maximum compatibility. If it's not playing, please check the following:
 - Check your internet connection
 - Some streams may be region-locked to New Zealand
 

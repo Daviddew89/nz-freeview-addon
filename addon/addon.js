@@ -43,17 +43,15 @@ const DEFAULT_ICON = 'https://i.mjh.nz/tv-logo/tvmate/Freeview.png';
 // The public host for the addon. This is crucial for generating absolute URLs that the Stremio
 // web player can use. We fall back to a local address for development.
 const PORT = process.env.PORT || 8080;
-// Automatically detect the host URL. Prioritize Google Cloud Run's provided URL,
-// then a manually set ADDON_HOST, and finally fall back to localhost for local dev.
-let ADDON_HOST = process.env.K_SERVICE_URL || process.env.ADDON_HOST;
+// The addon's public host URL. This is critical for generating absolute stream URLs.
+// It's automatically detected from Google Cloud Run's K_SERVICE_URL environment variable.
+// If deploying elsewhere, the ADDON_HOST environment variable must be set manually.
+const ADDON_HOST = process.env.K_SERVICE_URL || process.env.ADDON_HOST;
  
-if (ADDON_HOST) {
-    log('INFO', 'CONFIG', `Public addon host detected: ${ADDON_HOST}`);
+if (!ADDON_HOST) {
+    log('ERROR', 'CONFIG', 'CRITICAL: Addon host URL is not configured. Set K_SERVICE_URL or ADDON_HOST.');
 } else {
-    // Fallback for local development. This will not work with the Stremio web player.
-    // For web player testing, use a tunnel like ngrok and set the ADDON_HOST env variable.
-    ADDON_HOST = `http://127.0.0.1:${PORT}`;
-    log('WARN', 'CONFIG', `No K_SERVICE_URL or ADDON_HOST found. Defaulting to ${ADDON_HOST}. This is for local testing only.`);
+    log('INFO', 'CONFIG', `Public addon host detected: ${ADDON_HOST}`);
 }
 
 const manifest = {
@@ -88,7 +86,7 @@ const builder = new addonBuilder(manifest);
 
 // Cache configuration
 const CACHE_CONFIG = {
-    EPG_CACHE_DURATION: 60 * 60 * 1000, // 1 hour
+    EPG_CACHE_DURATION: 24 * 60 * 60 * 1000, // 24 hours
     CHANNEL_CACHE_DURATION: 60 * 60 * 1000, // 1 hour
 };
 
@@ -96,118 +94,130 @@ const CACHE_CONFIG = {
 let epgCache = {
     data: null,
     lastFetch: 0,
-    isUpdating: false
+    updatePromise: null
 };
 
 let channelCache = {
     data: null,
     lastFetch: 0,
-    isUpdating: false
+    updatePromise: null
 };
 
 // Update EPG cache
 async function updateEpgCache() {
-    if (epgCache.isUpdating) {
-        log('DEBUG', 'EPG_CACHE', 'Update already in progress, skipping');
-        return;
+    // If an update is already in progress, return the existing promise to avoid race conditions.
+    if (epgCache.updatePromise) {
+        log('DEBUG', 'EPG_CACHE', 'Update already in progress, awaiting existing fetch.');
+        return epgCache.updatePromise;
     }
     
     const startTime = Date.now();
-    epgCache.isUpdating = true;
-    
-    try {
-        log('INFO', 'EPG_CACHE', 'Starting EPG update');
-        const epgRes = await fetch(EPG_URL);
-        const epgBuf = await epgRes.buffer();
-        const epgXml = zlib.gunzipSync(epgBuf).toString();
-        const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '' });
-        const epg = parser.parse(epgXml);
-        
-        epgCache.data = epg;
-        epgCache.lastFetch = Date.now();
-        
-        const duration = Date.now() - startTime;
-        const programmeCount = epg.tv.programme?.length || 0;
-        log('INFO', 'EPG_CACHE', `Updated with ${programmeCount} programmes`, { 
-            duration, 
-            programmeCount
-        });
-        
-    } catch (error) {
-        const duration = Date.now() - startTime;
-        log('ERROR', 'EPG_CACHE', 'Update failed', { 
-            error: error.message, 
-            duration 
-        });
-    } finally {
-        epgCache.isUpdating = false;
-    }
+    const updateLogic = async () => {
+        try {
+            log('INFO', 'EPG_CACHE', 'Starting EPG update');
+            const epgRes = await fetch(EPG_URL);
+            const epgBuf = await epgRes.buffer();
+            const epgXml = zlib.gunzipSync(epgBuf).toString();
+            const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '' });
+            const epg = parser.parse(epgXml);
+            
+            epgCache.data = epg;
+            epgCache.lastFetch = Date.now();
+            
+            const duration = Date.now() - startTime;
+            const programmeCount = epg.tv.programme?.length || 0;
+            log('INFO', 'EPG_CACHE', `Updated with ${programmeCount} programmes`, { 
+                duration, 
+                programmeCount
+            });
+            
+        } catch (error) {
+            const duration = Date.now() - startTime;
+            log('ERROR', 'EPG_CACHE', 'Update failed', { 
+                error: error.message, 
+                duration 
+            });
+            // Do not replace existing stale data if the update fails
+        } finally {
+            // Clear the promise to allow future updates
+            epgCache.updatePromise = null;
+        }
+    };
+
+    epgCache.updatePromise = updateLogic();
+    return epgCache.updatePromise;
 }
 
 // Update channel cache
 async function updateChannelCache() {
-    if (channelCache.isUpdating) {
-        log('DEBUG', 'CHANNEL_CACHE', 'Update already in progress, skipping');
-        return;
+    // If an update is already in progress, return the existing promise.
+    if (channelCache.updatePromise) {
+        log('DEBUG', 'CHANNEL_CACHE', 'Update already in progress, awaiting existing fetch.');
+        return channelCache.updatePromise;
     }
     
     const startTime = Date.now();
-    channelCache.isUpdating = true;
-    
-    try {
-        log('INFO', 'CHANNEL_CACHE', 'Starting channel update');
-        const m3uRes = await fetch(M3U_URL);
-        const m3u = await m3uRes.text();
-        const lines = m3u.split(/\r?\n/);
-        
-        const channels = [];
-        let cur = null;
-        for (let i = 0; i < lines.length; ++i) {
-            const line = lines[i];
-            if (line.startsWith('#EXTINF:')) {
-                const attrs = {};
-                const attrRegex = /([\w-]+)="([^"]*)"/g;
-                let match;
-                while ((match = attrRegex.exec(line))) {
-                    attrs[match[1]] = match[2];
+    const updateLogic = async () => {
+        try {
+            log('INFO', 'CHANNEL_CACHE', 'Starting channel update');
+            const m3uRes = await fetch(M3U_URL);
+            const m3u = await m3uRes.text();
+            const lines = m3u.split(/\r?\n/);
+            
+            const channels = [];
+            let cur = null;
+            for (let i = 0; i < lines.length; ++i) {
+                const line = lines[i];
+                if (line.startsWith('#EXTINF:')) {
+                    const attrs = {};
+                    const attrRegex = /([\w-]+)="([^"]*)"/g;
+                    let match;
+                    while ((match = attrRegex.exec(line))) {
+                        attrs[match[1]] = match[2];
+                    }
+                    const lastComma = line.lastIndexOf(',');
+                    let name = lastComma !== -1 ? line.slice(lastComma + 1).trim() : undefined;
+                    cur = {
+                        id: attrs['channel-id'] || attrs['tvg-id'] || (name ? name.replace(/\s+/g, '-').toLowerCase() : undefined),
+                        name,
+                        logo: attrs['tvg-logo'] || undefined,
+                        group: attrs['group-title'] || undefined,
+                        chno: attrs['tvg-chno'] || undefined,
+                        url: null
+                    };
+                } else if (cur && line && !line.startsWith('#')) {
+                    cur.url = line.trim();
+                    if (cur.id && cur.name && cur.url) {
+                        channels.push(cur);
+                    }
+                    cur = null;
                 }
-                const lastComma = line.lastIndexOf(',');
-                let name = lastComma !== -1 ? line.slice(lastComma + 1).trim() : undefined;
-                cur = {
-                    id: attrs['channel-id'] || attrs['tvg-id'] || (name ? name.replace(/\s+/g, '-').toLowerCase() : undefined),
-                    name,
-                    logo: attrs['tvg-logo'] || undefined,
-                    group: attrs['group-title'] || undefined,
-                    chno: attrs['tvg-chno'] || undefined,
-                    url: null
-                };
-            } else if (cur && line && !line.startsWith('#')) {
-                cur.url = line.trim();
-                if (cur.id && cur.name && cur.url) {
-                    channels.push(cur);
-                }
-                cur = null;
             }
+            
+            channelCache.data = channels;
+            channelCache.lastFetch = Date.now();
+            
+            const duration = Date.now() - startTime;
+            log('INFO', 'CHANNEL_CACHE', `Updated with ${channels.length} channels`, { 
+                duration, 
+                channelCount: channels.length 
+            });
+            
+        } catch (error) {
+            const duration = Date.now() - startTime;
+            log('ERROR', 'CHANNEL_CACHE', 'Update failed', { 
+                error: error.message, 
+                duration 
+            });
+            // Do not replace existing stale data if the update fails
+        } finally {
+            // Clear the promise to allow future updates
+            channelCache.updatePromise = null;
         }
-        
-        channelCache.data = channels;
-        channelCache.lastFetch = Date.now();
-        
-        const duration = Date.now() - startTime;
-        log('INFO', 'CHANNEL_CACHE', `Updated with ${channels.length} channels`, { 
-            duration, 
-            channelCount: channels.length 
-        });
-        
-    } catch (error) {
-        const duration = Date.now() - startTime;
-        log('ERROR', 'CHANNEL_CACHE', 'Update failed', { 
-            error: error.message, 
-            duration 
-        });
-    } finally {
-        channelCache.isUpdating = false;
-    }
+    };
+
+    channelCache.updatePromise = updateLogic();
+    return channelCache.updatePromise;
 }
 
 // Get EPG data with caching
@@ -231,7 +241,7 @@ async function getChannels() {
         await updateChannelCache();
     }
     
-    return channelCache.data;
+    return channelCache.data || []; // Always return an array
 }
 
 function parseEpgDate(dateString) {
@@ -487,6 +497,12 @@ builder.defineStreamHandler(async (args) => {
     const startTime = Date.now();
     log('INFO', 'STREAM', 'Processing stream request', { id: args.id });
 
+    if (!ADDON_HOST) {
+        log('ERROR', 'STREAM', 'Cannot provide streams because addon host URL is not configured.');
+        // Stremio expects an empty streams array if no streams are available.
+        return { streams: [] };
+    }
+
     // The SDK automatically strips the prefix from the ID, so we can use it directly.
     const channelId = args.id;
     const allChannels = await getChannels();
@@ -507,7 +523,7 @@ builder.defineStreamHandler(async (args) => {
     const streamOrigin = new URL(cleanUrl).origin;
 
     // Always generate an absolute URL for the proxy. This is required for the Stremio web player.
-    const proxyUrl = new URL(`/proxy/${encodeURIComponent(cleanUrl)}`, ADDON_HOST).href;
+    const proxyUrl = `${ADDON_HOST}/proxy/${encodeURIComponent(cleanUrl)}`;
     
     // We provide a single, robust proxied stream. This works across all clients (web, desktop, mobile)
     // by routing the HLS traffic through our addon's server, which resolves CORS issues and
@@ -516,10 +532,13 @@ builder.defineStreamHandler(async (args) => {
         {
             url: proxyUrl,
             name: 'NZ Freeview (Proxied)',
-            title: `${channel.name || 'Unknown Channel'}`,
-            type: 'hls',
+            // Use `description` as `title` is being deprecated.
+            description: `${channel.name || 'Unknown Channel'}`,
             behaviorHints: {
-                notWebReady: false 
+                // This is crucial for HLS streams. It tells Stremio that the URL,
+                // while served over HTTPS, is not a standard MP4 file and requires
+                // a player that can handle HLS manifests.
+                notWebReady: true
             }
         }
     ];

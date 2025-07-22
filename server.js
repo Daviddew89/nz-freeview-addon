@@ -49,82 +49,127 @@ app.get('/configure.js', (req, res) => {
     res.sendFile(path.join(__dirname, 'config-ui', 'configure.js'));
 });
 
+// Serve configure.js at /configure/configure.js for correct relative path support
+app.get('/configure/configure.js', (req, res) => {
+    res.sendFile(path.join(__dirname, 'config-ui', 'configure.js'));
+});
+
 const proxyHandler = async (req, res) => {
+    let decodedUrl;
+    let upstreamRes;
     try {
         const encodedUrl = req.params[0];
         if (!encodedUrl) {
             return res.status(400).json({ error: 'No encoded URL provided to proxy' });
         }
 
-        const decodedUrl = decodeURIComponent(encodedUrl);
-        if (!decodedUrl.startsWith('http')) {
+        decodedUrl = decodeURIComponent(encodedUrl);
+        if (!/^https?:\/\//.test(decodedUrl)) {
             return res.status(400).json({ error: 'Invalid URL provided for proxy. Must start with http or https.' });
         }
 
         const baseUrl = new URL(decodedUrl);
-        
-        console.log(`[PROXY] [${req.method}] Proxying request to: ${decodedUrl}`);
-        
-        const response = await fetch(decodedUrl, {
-            method: req.method, // Pass through the method (GET or HEAD)
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Referer': baseUrl.origin
-            },
-            timeout: 30000
-        });
 
-        if (!response.ok) {
-            throw new Error(`Upstream HTTP ${response.status}: ${response.statusText}`);
+        // Log for debugging
+        console.log(`[PROXY] [${req.method}] Proxying: ${decodedUrl}`);
+
+        // Set a timeout for upstream fetch (30s)
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 30000);
+
+        try {
+            upstreamRes = await fetch(decodedUrl, {
+                method: req.method,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'Referer': baseUrl.origin
+                },
+                signal: controller.signal
+            });
+            if (!upstreamRes.ok && req.method === 'HEAD') {
+                throw new Error('HEAD not supported, fallback to GET');
+            }
+        } catch (err) {
+            if (req.method === 'HEAD') {
+                // Fallback to GET
+                upstreamRes = await fetch(decodedUrl, {
+                    method: 'GET',
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                        'Referer': baseUrl.origin
+                    },
+                    signal: controller.signal
+                });
+            } else {
+                throw err;
+            }
         }
 
-        const contentType = response.headers.get('content-type') || '';
-        res.setHeader('Content-Type', contentType);
+        clearTimeout(timeout);
 
-        const contentLength = response.headers.get('content-length');
+        if (!upstreamRes.ok) {
+            throw new Error(`Upstream HTTP ${upstreamRes.status}: ${upstreamRes.statusText}`);
+        }
+
+        // Get content type
+        let contentType = upstreamRes.headers.get('content-type') || '';
+        const isM3U8 = contentType.includes('mpegurl') || contentType.includes('x-mpegURL') || decodedUrl.endsWith('.m3u8');
+        const isTS = contentType.includes('video/MP2T') || decodedUrl.endsWith('.ts');
+
+        // Set content type for .ts if missing
+        if (!contentType && isTS) {
+            contentType = 'video/MP2T';
+        }
+        if (contentType) {
+            res.setHeader('Content-Type', contentType);
+        }
+
+        // Set content length if present
+        const contentLength = upstreamRes.headers.get('content-length');
         if (contentLength) {
             res.setHeader('Content-Length', contentLength);
         }
 
-        // For HEAD requests, we are done. Just send the headers.
+        // For HEAD, just send headers
         if (req.method === 'HEAD') {
             res.end();
             return;
         }
 
-        // If it's an HLS manifest, we need to rewrite its contents
-        if (contentType.includes('mpegurl') || contentType.includes('x-mpegURL')) {
-            let m3u8Body = await response.text();
-            
-            // Determine the addon's base URL from the incoming request. This is crucial for rewriting
-            // relative paths in the manifest to absolute paths that the player can understand.
+        // HLS manifest: rewrite segment URLs to go through our proxy
+        if (isM3U8) {
+            let m3u8Body = await upstreamRes.text();
             const addonBaseUrl = `${req.protocol}://${req.get('host')}`;
-
             const rewrittenLines = m3u8Body.split('\n').map(line => {
                 line = line.trim();
                 if (line && !line.startsWith('#')) {
-                    // This is a URL to a segment or another playlist. Resolve it and re-proxy.
-                    const absoluteUrl = new URL(line, baseUrl).href;
-                    return `${addonBaseUrl}/proxy/${encodeURIComponent(absoluteUrl)}`;
+                    // Only rewrite if it's not already absolute and not already proxied
+                    try {
+                        const absUrl = new URL(line, baseUrl).href;
+                        if (absUrl.startsWith(addonBaseUrl)) return line; // already proxied
+                        return `${addonBaseUrl}/proxy/${encodeURIComponent(absUrl)}`;
+                    } catch {
+                        return line;
+                    }
                 }
                 return line;
             });
-            
             const rewrittenBody = rewrittenLines.join('\n');
-            // Recalculate content-length for the rewritten body
             res.setHeader('Content-Length', Buffer.byteLength(rewrittenBody, 'utf-8'));
             res.send(rewrittenBody);
         } else {
-            // For any other content (like .ts segments), just pipe it
-            response.body.pipe(res);
+            // For .ts and other files, stream the response
+            // Remove content-length if chunked
+            if (!contentLength) res.removeHeader('Content-Length');
+            upstreamRes.body.pipe(res);
         }
-        
     } catch (error) {
         console.error(`[PROXY] [${req.method}] Error:`, error.message);
-        res.status(500).json({ 
-            error: 'Proxy error', 
-            message: error.message,
-            url: req.params[0] // Keep showing the encoded URL for debugging
+        res.status(500).json({
+            error: 'Proxy error',
+            message: `${error.message}${decodedUrl ? ` for URL: ${decodedUrl}` : ''}`,
+            upstreamStatus: upstreamRes ? upstreamRes.status : null,
+            url: req.params[0] || null
         });
     }
 };

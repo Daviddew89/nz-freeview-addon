@@ -4,15 +4,11 @@ This project provides a Stremio add-on for New Zealand Freeview TV channels, wit
 
 ## Features
 - Watch free NZ TV channels in Stremio
-- Full EPG (program guide) integration with current show images
-- **Rich Programme Metadata**: Title, description, rating, cast, director, awards
-- **Video Objects**: Only the current programme is shown for selection (no "up next")
-- **Related Content Links**: Actor, director, and genre links
-- **Enhanced Search**: Search by show title, description, and programme info
+- Full EPG (program guide) integration with current show information displayed in the description.
+- **Single-Click Play**: Channels start playing immediately, just like a real TV.
 - Modern, dark-mode config UI at `/configure/`
 - Drag-and-drop channel reordering and selection
 - Channel selection and manifest URL generation
-- Real-time EPG data with show thumbnails and artwork
 - **No external metadata enrichment**: Only EPG data is used, with robust fallbacks
 - **Logo**: Custom logo is used in Stremio (see `/static/Logo.png`)
 - **Google Cloud Run ready**: Easy deployment and update scripts
@@ -67,7 +63,7 @@ npm start
 ## Troubleshooting
 
 - **Manifest Loading Issues**: Ensure the server is running and accessible at the correct port or Cloud Run URL.
-- **Streams Not Playing**: Some streams may be region-locked to New Zealand. Check your network and try a VPN if outside NZ.
+- **Streams Not Playing**: The addon uses a proxy to ensure compatibility. If streams fail, check your network connection. Some streams may also be region-locked to New Zealand.
 - **Metadata Issues**: Only EPG data is used. If EPG is missing, robust fallbacks (channel name/logo) are used.
 - **Logo Not Showing**: Ensure `/static/Logo.png` is present and accessible.
 
