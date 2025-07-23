@@ -188,7 +188,7 @@ const proxyHandler = async (req, res) => {
         // HLS manifest: rewrite segment URLs to go through our proxy
         if (isM3U8) {
             let m3u8Body = await upstreamRes.text();
-            const addonBaseUrl = `${req.protocol}://${req.get('host')}`;
+            const addonBaseUrl = process.env.K_SERVICE_URL || process.env.ADDON_HOST || `${req.protocol}://${req.get('host')}`;
             const rewrittenLines = m3u8Body.split('\n').map(line => {
                 line = line.trim();
                 if (line && !line.startsWith('#')) {
