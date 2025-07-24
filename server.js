@@ -23,8 +23,7 @@ app.use((req, res, next) => {
         'https://web.stremio.com',
         'https://app.strem.io',
         'https://stremio.github.io',
-        'http://127.0.0.1:11470',
-        'http://localhost:11470'
+        'https://nz-freeview-addon-355637409766.us-west1.run.app'
     ];
     
     // Allow specific origins for Stremio web player
@@ -188,7 +187,7 @@ const proxyHandler = async (req, res) => {
         // HLS manifest: rewrite segment URLs to go through our proxy
         if (isM3U8) {
             let m3u8Body = await upstreamRes.text();
-            const addonBaseUrl = process.env.K_SERVICE_URL || process.env.ADDON_HOST || `${req.protocol}://${req.get('host')}`;
+            const addonBaseUrl = (process.env.K_SERVICE_URL || process.env.ADDON_HOST || `${req.protocol}://${req.get('host')}`).replace(/^http:\/\//, 'https://');
             const rewrittenLines = m3u8Body.split('\n').map(line => {
                 line = line.trim();
                 if (line && !line.startsWith('#')) {
