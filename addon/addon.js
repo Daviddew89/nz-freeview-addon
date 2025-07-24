@@ -416,7 +416,12 @@ builder.defineStreamHandler(async (args) => {
             isHLS: true, // Indicate this is an HLS stream
             isCORSRequired: true,
             player: 'hls',  // Force HLS player
-            subtitlesForDirectPlayback: false
+            subtitlesForDirectPlayback: false,
+            proxyHeaders: {
+                "request": {
+                    ...streamHeaders
+                }
+            }
         }
     };
     
