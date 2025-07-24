@@ -2,8 +2,6 @@ const express = require('express');
 const path = require('path');
 const { getRouter } = require('stremio-addon-sdk');
 const addonInterface = require('./addon/addon.js');
-const AbortController = require('abort-controller');
-const fetch = require('node-fetch');
 
 // Read version from package.json to have a single source of truth
 const { version } = require('./package.json');

@@ -1,5 +1,4 @@
 const { addonBuilder } = require('stremio-addon-sdk');
-const fetch = require('node-fetch');
 
 // Enhanced logging system for production debugging
 const LOG_LEVELS = {
