@@ -412,7 +412,7 @@ builder.defineStreamHandler(async (args) => {
             isLive: true,
             bingeGroup: `nzfreeview-${channelId}`,
             // Transport hints
-            notWebReady: false, // Allow web player to handle HLS directly
+            notWebReady: true, // Force proxying for web player
             isHLS: true, // Indicate this is an HLS stream
             isCORSRequired: true,
             player: 'hls',  // Force HLS player
