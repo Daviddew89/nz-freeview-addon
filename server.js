@@ -23,8 +23,7 @@ app.use((req, res, next) => {
         'https://web.stremio.com',
         'https://app.strem.io',
         'https://stremio.github.io',
-        'http://127.0.0.1:11470',
-        'http://localhost:11470'
+        'https://nz-freeview-addon-355637409766.us-west1.run.app'
     ];
     
     // Allow specific origins for Stremio web player
