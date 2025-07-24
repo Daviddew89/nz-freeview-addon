@@ -42,10 +42,10 @@ const PORT = process.env.PORT || 8080;
 // The addon's public host URL. This is critical for generating absolute stream URLs.
 // It's automatically detected from Google Cloud Run's K_SERVICE_URL environment variable.
 // If deploying elsewhere, the ADDON_HOST environment variable must be set manually.
-const ADDON_HOST = process.env.K_SERVICE_URL || process.env.ADDON_HOST || `http://127.0.0.1:${PORT}`;
+const ADDON_HOST = process.env.K_SERVICE_URL || process.env.ADDON_HOST;
  
 if (!ADDON_HOST) {
-    log('ERROR', 'CONFIG', 'CRITICAL: Addon host URL is not configured. Set K_SERVICE_URL or ADDON_HOST.');
+    log('WARN', 'CONFIG', 'Addon host URL not configured. Will be derived from request.');
 } else {
     log('INFO', 'CONFIG', `Public addon host detected: ${ADDON_HOST}`);
 }
@@ -55,8 +55,8 @@ const { version } = require('../package.json');
 
 // Construct the absolute logo URL. This is essential for Stremio clients (especially web)
 // to be able to load the image. We fall back to a generic icon if the host is not available.
-const LOGO_URL = ADDON_HOST 
-    ? `${ADDON_HOST}/static/Logo.png` 
+const LOGO_URL = ADDON_HOST
+    ? `${ADDON_HOST}/static/Logo.png`
     : 'https://i.mjh.nz/tv-logo/tvmate/Freeview.png';
 
 const manifest = {
@@ -360,13 +360,15 @@ builder.defineMetaHandler(async (args) => {
 });
 
 // Stream handler
-builder.defineStreamHandler(async (args) => {    
+builder.defineStreamHandler(async (args) => {
     const startTime = Date.now();
     log('INFO', 'STREAM', 'Processing stream request', { id: args.id });
 
-    if (!ADDON_HOST) {
-        log('ERROR', 'STREAM', 'Cannot provide streams because addon host URL is not configured.');
-        // Stremio expects an empty streams array if no streams are available.
+    // Dynamically determine host from request if not set by environment
+    const host = ADDON_HOST || (args.req ? `${args.req.protocol}://${args.req.get('host')}` : null);
+
+    if (!host) {
+        log('ERROR', 'STREAM', 'Cannot determine addon host. Set ADDON_HOST env var or ensure request context is available.');
         return { streams: [] };
     }
 
@@ -382,7 +384,7 @@ builder.defineStreamHandler(async (args) => {
     const url = channelData.mjh_master;
     
     // Build proxy URL with headers - used for both the manifest and segments
-    let proxyUrl = `${ADDON_HOST}/proxy/${encodeURIComponent(url)}`;
+    let proxyUrl = `${host}/proxy/${encodeURIComponent(url)}`;
     if (channelData.headers) {
         const encodedHeaders = encodeURIComponent(JSON.stringify(channelData.headers));
         proxyUrl += `?headers=${encodedHeaders}`;
