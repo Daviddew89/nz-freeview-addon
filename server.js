@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const { getRouter } = require('stremio-addon-sdk');
 const addonInterface = require('./addon/addon.js');
+const AbortController = require('abort-controller');
 const fetch = require('node-fetch');
 
 // Read version from package.json to have a single source of truth
@@ -78,6 +79,69 @@ app.get('/configure/configure.js', (req, res) => {
     res.sendFile(path.join(__dirname, 'config-ui', 'configure.js'));
 });
 
+// --- Resilient Fetch Logic ---
+const PROXY_URLS = [
+    'https://corsproxy.io/?',
+    'https://cors.eu.org/',
+    'https://thingproxy.freeboard.io/fetch/',
+];
+
+/**
+ * A wrapper for fetch that adds a timeout.
+ * @param resource The URL to fetch.
+ * @param options Fetch options, including an optional timeout in milliseconds.
+ * @returns A Promise that resolves to a Response.
+ */
+const fetchWithTimeout = async (resource, options = {}) => {
+    const { timeout = 15000 } = options;
+
+    const controller = new AbortController();
+    const id = setTimeout(() => {
+        console.warn(`Request timed out after ${timeout}ms: ${resource}`);
+        controller.abort();
+    }, timeout);
+
+    const response = await fetch(resource, {
+        ...options,
+        signal: controller.signal
+    });
+
+    clearTimeout(id);
+    return response;
+};
+
+/**
+ * Tries to fetch a resource using a series of CORS proxies until one succeeds.
+ * Also tries a direct connection as a fallback.
+ * @param url The target resource URL.
+ * @param options Fetch options.
+ * @returns A Promise that resolves to a Response.
+ * @throws An error if all attempts fail.
+ */
+const resilientFetch = async (url, options = {}) => {
+    let lastError = null;
+
+    for (const proxy of PROXY_URLS) {
+        const proxyUrl = `${proxy}${url}`;
+        try {
+            const response = await fetchWithTimeout(proxyUrl, options);
+            if (!response.ok) {
+                throw new Error(`Request failed with status ${response.status} for ${proxyUrl}`);
+            }
+            return response;
+        } catch (error) {
+            console.warn(`Proxy failed: ${proxy}, error:`, error);
+            lastError = error instanceof Error ? error : new Error(String(error));
+        }
+    }
+
+    try {
+        const response = await fetchWithTimeout(url, options);
+        if (!response.ok) throw new Error(`Direct request failed with status ${response.status}`);
+        return response;
+    } catch (error) { lastError = error instanceof Error ? error : new Error(`Direct connection failed: ${String(error)}. Last proxy error: ${lastError}`); throw lastError; }
+};
+// --- End of Resilient Fetch Logic ---
 const proxyHandler = async (req, res) => {
     let decodedUrl;
     let upstreamRes;
@@ -135,7 +199,7 @@ const proxyHandler = async (req, res) => {
         // Always try GET for HLS, as some servers don't support HEAD
         const method = req.method === 'HEAD' ? 'GET' : req.method;
         try {
-            upstreamRes = await fetch(decodedUrl, {
+            upstreamRes = await resilientFetch(decodedUrl, {
                 method: method,
                 headers: customHeaders,
                 signal: controller.signal
