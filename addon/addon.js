@@ -42,7 +42,7 @@ const PORT = process.env.PORT || 8080;
 // The addon's public host URL. This is critical for generating absolute stream URLs.
 // It's automatically detected from Google Cloud Run's K_SERVICE_URL environment variable.
 // If deploying elsewhere, the ADDON_HOST environment variable must be set manually.
-const ADDON_HOST = (process.env.K_SERVICE_URL || process.env.ADDON_HOST || '').replace(/^http:\/\//, 'https://');
+const ADDON_HOST = process.env.K_SERVICE_URL || process.env.ADDON_HOST || `http://127.0.0.1:${PORT}`;
  
 if (!ADDON_HOST) {
     log('ERROR', 'CONFIG', 'CRITICAL: Addon host URL is not configured. Set K_SERVICE_URL or ADDON_HOST.');

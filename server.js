@@ -77,13 +77,6 @@ app.get('/configure/configure.js', (req, res) => {
     res.sendFile(path.join(__dirname, 'config-ui', 'configure.js'));
 });
 
-// --- Resilient Fetch Logic ---
-const PROXY_URLS = [
-    'https://corsproxy.io/?',
-    'https://cors.eu.org/',
-    'https://thingproxy.freeboard.io/fetch/',
-];
-
 /**
  * A wrapper for fetch that adds a timeout.
  * @param resource The URL to fetch.
@@ -107,39 +100,6 @@ const fetchWithTimeout = async (resource, options = {}) => {
     clearTimeout(id);
     return response;
 };
-
-/**
- * Tries to fetch a resource using a series of CORS proxies until one succeeds.
- * Also tries a direct connection as a fallback.
- * @param url The target resource URL.
- * @param options Fetch options.
- * @returns A Promise that resolves to a Response.
- * @throws An error if all attempts fail.
- */
-const resilientFetch = async (url, options = {}) => {
-    let lastError = null;
-
-    for (const proxy of PROXY_URLS) {
-        const proxyUrl = `${proxy}${url}`;
-        try {
-            const response = await fetchWithTimeout(proxyUrl, options);
-            if (!response.ok) {
-                throw new Error(`Request failed with status ${response.status} for ${proxyUrl}`);
-            }
-            return response;
-        } catch (error) {
-            console.warn(`Proxy failed: ${proxy}, error:`, error);
-            lastError = error instanceof Error ? error : new Error(String(error));
-        }
-    }
-
-    try {
-        const response = await fetchWithTimeout(url, options);
-        if (!response.ok) throw new Error(`Direct request failed with status ${response.status}`);
-        return response;
-    } catch (error) { lastError = error instanceof Error ? error : new Error(`Direct connection failed: ${String(error)}. Last proxy error: ${lastError}`); throw lastError; }
-};
-// --- End of Resilient Fetch Logic ---
 const proxyHandler = async (req, res) => {
     let decodedUrl;
     let upstreamRes;
@@ -197,7 +157,7 @@ const proxyHandler = async (req, res) => {
         // Always try GET for HLS, as some servers don't support HEAD
         const method = req.method === 'HEAD' ? 'GET' : req.method;
         try {
-            upstreamRes = await resilientFetch(decodedUrl, {
+            upstreamRes = await fetchWithTimeout(decodedUrl, {
                 method: method,
                 headers: customHeaders,
                 signal: controller.signal
@@ -249,7 +209,7 @@ const proxyHandler = async (req, res) => {
         // HLS manifest: rewrite segment URLs to go through our proxy
         if (isM3U8) {
             let m3u8Body = await upstreamRes.text();
-            const addonBaseUrl = (process.env.K_SERVICE_URL || process.env.ADDON_HOST || `${req.protocol}://${req.get('host')}`).replace(/^http:\/\//, 'https://');
+            const addonBaseUrl = process.env.K_SERVICE_URL || process.env.ADDON_HOST || `${req.protocol}://${req.get('host')}`;
             const rewrittenLines = m3u8Body.split('\n').map(line => {
                 line = line.trim();
                 if (line && !line.startsWith('#')) {
