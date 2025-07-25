@@ -25,8 +25,5 @@
     "streaming"
   ],
   "author": "Your Name",
-  "license": "MIT",
-  "overrides": {
-    "path-to-regexp": "^6.2.2"
-  }
+  "license": "MIT"
 }
