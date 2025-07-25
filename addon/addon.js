@@ -398,7 +398,7 @@ builder.defineStreamHandler(async (args) => {
 
     // Define headers as a string to avoid double encoding
     const defaultHeaders = {
-        'User-Agent': 'stremio-freeview/1.0.0',
+        'User-Agent': `stremio-freeview/${version}`,
         'Referer': ' ',
         'seekable': '0'
     };
