@@ -69,8 +69,7 @@ const proxy = createProxyMiddleware({
             proxyRes.on('data', (chunk) => body.push(chunk));
             proxyRes.on('end', () => {
                 let m3u8Body = Buffer.concat(body).toString();
-                const lines = m3u8Body.split('
-');
+                const lines = m3u8Body.split('\n');
                 const rewrittenBody = lines.map(line => {
                     const trimmedLine = line.trim();
                     if (trimmedLine && !trimmedLine.startsWith('#')) {
@@ -82,8 +81,7 @@ const proxy = createProxyMiddleware({
                         }
                     }
                     return trimmedLine;
-                }).join('
-');
+                }).join('\n');
                 
                 res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
                 res.setHeader('Content-Length', Buffer.byteLength(rewrittenBody));
