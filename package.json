@@ -1,6 +1,6 @@
 {
   "name": "nz-freeview-addon",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "NZ Freeview TV addon for Stremio",
   "main": "server.js",
   "scripts": {
@@ -25,5 +25,8 @@
     "streaming"
   ],
   "author": "Your Name",
-  "license": "MIT"
+  "license": "MIT",
+  "overrides": {
+    "path-to-regexp": "^6.2.2"
+  }
 }
