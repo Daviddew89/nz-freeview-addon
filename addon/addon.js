@@ -233,7 +233,9 @@ builder.defineCatalogHandler(async (args) => {
                 if (currentProgram) {
                     const startTime = new Date(currentProgram.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
                     const endTime = new Date(currentProgram.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-                    description = `Now: ${currentProgram.title} (${startTime} - ${endTime})\n\n${channelData.description || ''}`;
+                    description = `Now: ${currentProgram.title} (${startTime} - ${endTime})
+
+${channelData.description || ''}`;
                 }
 
                 const genres = channelData.network ? [channelData.network] : ['Live'];
@@ -313,7 +315,9 @@ builder.defineMetaHandler(async (args) => {
         if (currentProgram) {
             const startTime = new Date(currentProgram.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
             const endTime = new Date(currentProgram.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-            description = `Now: ${currentProgram.title} (${startTime} - ${endTime})\n\n${channelData.description || ''}`;
+            description = `Now: ${currentProgram.title} (${startTime} - ${endTime})
+
+${channelData.description || ''}`;
         }
 
         const genres = channelData.network ? [channelData.network] : ['Live'];
@@ -417,7 +421,10 @@ builder.defineStreamHandler(async (args) => {
             isHLS: true, // Indicate this is an HLS stream
             isCORSRequired: true,
             player: 'hls',  // Force HLS player
-            subtitlesForDirectPlayback: false
+            subtitlesForDirectPlayback: false,
+            proxyHeaders: { // ADDED THIS
+                request: streamHeaders // ADDED THIS
+            }
         }
     };
     
