@@ -368,11 +368,13 @@ builder.defineStreamHandler(async (args) => {
     const startTime = Date.now();
     log('INFO', 'STREAM', 'Processing stream request', { id: args.id });
 
-    // Dynamically determine host from request if not set by environment
-    const host = ADDON_HOST || (args.req ? `${args.req.protocol}://${args.req.get('host')}` : null);
+    // IMPORTANT: The host MUST be the public-facing URL of the addon.
+    // The fallback to the request's host is removed as it causes a loop when
+    // Stremio's local streaming server (127.0.0.1) makes the request.
+    const host = ADDON_HOST;
 
     if (!host) {
-        log('ERROR', 'STREAM', 'Cannot determine addon host. Set ADDON_HOST env var or ensure request context is available.');
+        log('ERROR', 'STREAM', 'ADDON_HOST environment variable not set. This is required for the addon to function correctly.');
         return { streams: [] };
     }
 
@@ -418,12 +420,8 @@ builder.defineStreamHandler(async (args) => {
             bingeGroup: `nzfreeview-${channelId}`,
             // Transport hints
             notWebReady: true, // Force proxying for web player
-            isHLS: true, // Indicate this is an HLS stream
-            isCORSRequired: true,
-            player: 'hls',  // Force HLS player
-            subtitlesForDirectPlayback: false,
-            proxyHeaders: { // ADDED THIS
-                request: streamHeaders // ADDED THIS
+            proxyHeaders: {
+                request: streamHeaders
             }
         }
     };

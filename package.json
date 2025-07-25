@@ -1,6 +1,6 @@
 {
   "name": "nz-freeview-addon",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "NZ Freeview TV addon for Stremio",
   "main": "server.js",
   "scripts": {
